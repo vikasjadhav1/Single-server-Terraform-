@@ -1,0 +1,120 @@
+trigger:
+- none
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+# 🔹 Action Selection
+parameters:
+- name: action
+  displayName: "Select Action"
+  type: string
+  default: apply
+  values:
+  - apply
+  - destroy
+
+# 🔹 Variable Group
+variables:
+- group: terraform-vm-vars
+
+stages:
+- stage: Terraform
+  displayName: "Terraform VM Deployment Stage"
+
+  jobs:
+  - job: TerraformJob
+    displayName: "Terraform Execution"
+
+    steps:
+
+    # 📦 Install Terraform
+    - task: TerraformInstaller@1
+      displayName: "Install Terraform"
+      inputs:
+        terraformVersion: '1.5.0'
+
+    # 🔽 Download Existing State for Destroy
+    - task: DownloadPipelineArtifact@2
+      displayName: "Download Terraform State"
+      inputs:
+        buildType: 'specific'
+        project: '$(System.TeamProject)'
+        definition: '$(System.DefinitionId)'
+        buildVersionToDownload: 'latest'
+        artifactName: 'tfstate'
+        targetPath: '$(System.DefaultWorkingDirectory)'
+      condition: eq('${{ parameters.action }}', 'destroy')
+
+    # 🚀 Terraform Init
+    - script: terraform init
+      displayName: "Terraform Init"
+
+    # ✅ Terraform Format Check
+    - script: terraform fmt -check
+      displayName: "Terraform Format Check"
+      condition: eq('${{ parameters.action }}', 'apply')
+
+    # ✅ Terraform Validate
+    - script: terraform validate
+      displayName: "Terraform Validate"
+      condition: eq('${{ parameters.action }}', 'apply')
+
+    # 📊 Terraform Plan
+    - task: TerraformTaskV4@4
+      displayName: "Terraform Plan"
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        environmentServiceNameAzureRM: 'terraform_bootstarp'
+
+        commandOptions: >
+          -var "resource_group_name=$(resource_group_name)"
+          -var "location=$(location)"
+          -var "environment=$(environment)"
+          -out=tfplan
+      condition: eq('${{ parameters.action }}', 'apply')
+
+    # 🚀 Terraform Apply
+    - task: TerraformTaskV4@4
+      displayName: "Terraform Apply"
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        environmentServiceNameAzureRM: 'terraform_bootstarp'
+        commandOptions: 'tfplan'
+      condition: eq('${{ parameters.action }}', 'apply')
+
+    # 📤 Publish Terraform State
+    - task: PublishPipelineArtifact@1
+      displayName: "Publish Terraform State"
+      inputs:
+        targetPath: 'terraform.tfstate'
+        artifact: 'tfstate'
+      condition: eq('${{ parameters.action }}', 'apply')
+
+    # 📊 Terraform Destroy Plan
+    - task: TerraformTaskV4@4
+      displayName: "Terraform Destroy Plan"
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        environmentServiceNameAzureRM: 'terraform_bootstarp'
+
+        commandOptions: >
+          -destroy
+          -out=destroy.tfplan
+          -var "resource_group_name=$(resource_group_name)"
+          -var "location=$(location)"
+          -var "environment=$(environment)"
+      condition: eq('${{ parameters.action }}', 'destroy')
+
+    # 💣 Terraform Destroy
+    - task: TerraformTaskV4@4
+      displayName: "Terraform Destroy"
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        environmentServiceNameAzureRM: 'terraform_bootstarp'
+        commandOptions: 'destroy.tfplan'
+      condition: eq('${{ parameters.action }}', 'destroy')
