@@ -13,3 +13,8 @@ variable "admin_username" {
 variable "admin_password" {
   default = "Vikas@1234"
 }
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+}
